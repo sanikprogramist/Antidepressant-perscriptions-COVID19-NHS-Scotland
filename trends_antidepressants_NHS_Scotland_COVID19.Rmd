@@ -6,14 +6,13 @@ output:
     toc: true
     number_sections: true
     toc_depth: 3
-knit:(
-function(inputFIle, encoding){
-rmarkdown::render(
-input=inputFile,
-output_file="../index.html")
-}
-)
 urlcolor: blue
+knit: (
+  function(inputFile, encoding) {
+    
+    rmarkdown::render( 
+    input       = inputFile,
+    output_file = "../index.html") })
 ---
 
 ```{r setup, include=FALSE}
