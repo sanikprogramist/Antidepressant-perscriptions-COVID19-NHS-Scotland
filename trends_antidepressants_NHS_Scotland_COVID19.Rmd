@@ -1,0 +1,314 @@
+---
+title: "Trends in antidepressant prescription"
+date: "11/6/2022"
+output: 
+  html_document:
+    toc: true
+    number_sections: true
+    toc_depth: 3
+knit:(
+function(inputFIle, encoding){
+rmarkdown::render(
+input=inputFile,
+output_file="../index.html")
+}
+)
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE, message = FALSE)
+```
+
+# Did the COVID-19 pandemic influence rates of antidepressant prescription?
+The COVID-19 pandemic served as a major external stressor, and led to the implementation self-isolation policies to reduce the spread of the virus. During the first year of the pandemic alone, it is reported that anxiety and depression prevalence increased by 25% globally (WHO,2022). As such, it is possible that in addition to the direct burden on the NHS (overflowing hospitals, vaccinations, increased prescription of anti-inflammatory drugs), the COVID-19 pandemic increased the burden indirectly through the increasing demand for antidepressants. This report seeks to analyse trends in antidepressant prescription in Scotland during the COVID-19 pandemic.
+
+## Antidepressant prescription trends across the entirety of Scotland
+As a first step towards understanding trends in antidepressant prescription, the total quantity of prescribed items and their costs will be visualized at the onset of the pandemic in the UK - March 2020 (+/- 6 months). To be able to attribute any observed effects to the onset of the pandemic specifically, data from the year preceding the pandemic will be included, for a total range of September 2018 - September 2020.  
+
+### Data preparation  
+
+```{r load_data_files_wrangle}
+#First, necessary libraries are loaded
+library(tidyverse)
+library(here)
+library(lubridate)
+library(patchwork)
+library(rlang)
+library(ggpubr)
+library(pals)
+library(gt)
+library(broom)
+library(scales)
+
+#load between Sep 2018-2020 and combine together into a single dataframe
+files = list.files(here("data_2018-20"), pattern = "csv")
+data_pandemic = files %>% 
+  map_dfr(~read_csv(here("data_2018-20", .)))
+#wrangle data
+data_pandemic = data_pandemic %>% 
+  filter(str_detect(BNFItemCode, "^0403")) %>% #BNF Item codes beginning with "0403" are antidepressants
+  mutate(HB=coalesce(HBT,HBT2014), Date = format(ym(PaidDateMonth),format='%Y-%m')) %>% 
+  select(-BNFItemDescription,-ClassOfPreparationCode,-NumberOfPaidItems,
+         -HBT,-HBT2014,-PaidDateMonth,-BNFItemCode) #Remove unnecessary columns to reduce memory usage
+#group the data by month, calculate the sum of cost and number of items
+data_pandemic_total = data_pandemic %>% 
+  group_by(Date) %>% 
+  summarise(PaidQuantity = sum(PaidQuantity), GrossIngredientCost = sum(GrossIngredientCost))
+```
+
+### Visualisation  
+
+```{r entire_scotland_graph}
+#generate ggplot object 
+pandemic_start_scotland_graph = data_pandemic_total %>% 
+  ggplot(aes(x=as.factor(Date), group=1))+
+  #plot two lines, the second is scaled by 0.15 so both axes fit on the same graph
+  geom_line(aes(y=PaidQuantity, color = "darkorchid3"))+
+  geom_line(aes(y=GrossIngredientCost/0.15,color = "darkorange3"))+
+  #plot the second axis
+  #"scales" package used to turn the axis ticks into millions (+add "£" to the cost axis ticks as a suffix)
+  scale_y_continuous(sec.axis = sec_axis(~.*0.15, name="Gross ingredient cost (Millions)",
+                                         labels = dollar_format(prefix="£",suffix="M",scale = 1e-6)),
+                     labels = unit_format(suffix="M",scale = 1e-6))+
+  scale_color_manual(values=c("darkorange3","darkorchid3"))+
+  geom_vline(xintercept=c(7,19), linetype="dotted", color = c("grey","red"),size=1)+
+  geom_text(aes(label="< COVID-19",y=2e+07,x=19),color="red", 
+           size=3.5, angle=60, fontface="bold",hjust=0.1,vjust=1)+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust=1),
+        axis.title.y = element_text(color = "darkorchid3",vjust=3),
+        axis.title.y.right = element_text(color = "darkorange3",vjust=3),
+        legend.position = "none", axis.text=element_text(size=12),
+        axis.title=element_text(size=12,face="bold"))+
+  labs(title="Antidepressant prescription in Scotland at the onset of COVID-19",
+       y="Quantity of paid items (Millions)", x="")+
+  annotate("rect", fill = c("green","red"), alpha = 0.08, 
+        xmin = c(1,19), xmax = c(19,25), ymin = -Inf, ymax = Inf)
+pandemic_start_scotland_graph
+```
+
+### Discussion
+
+It is clear that both **the number of prescribed items and gross ingredient cost reach a peak in March 2020**, the start of the pandemic. Importantly, **no comparable observations are seen in March 2019**, a year before the pandemic onset. This suggests that the increase in prescription quantity and gross ingredient cost in March 2020 is due to the onset of the Pandemic, rather than a normal yearly fluctuation.  
+The prescription increase can be attributed to the increased anxiety and stress levels caused by the pandemic. It is also possible, that people were simply attempting to "stock up" on medication before lockdown restrictions were implemented, which would also explain why the peak in prescription quantity immediately declines. 
+The peak in gross ingredient cost is disproportionately large compared to the peak in quantity. Therefore, it can only partly be explained by the increased prescriptions. More likely such a large increase in cost resulted from global Active Pharmaceutical Ingredient (API) shortages (for example: Socal et al., 2021). The supply of APIs diminished, driving up the cost of antidepressant manufacturing. This was exacerbated by the decrease in imports of pharmaceutical products, as major suppliers such as India limited their exports (Ellis-Peterson, 2020). As such, each unit of antidepressants increased in price, resulting in a large jump in Gross Ingredient cost of antidepressants in March 2020.  
+Additionally, it is interesting to note that there is a gradual increase in the number of prescribed antidepressants across both years, possibly hinting at perpetually increasing anxiety/depressive symptoms in the population.
+
+## Is there regional variation in antidepressant prescrition between NHS Healthboards?  
+It is possible that some areas of Scotland were more affected by the onset of the COVID-19 pandemic than others, as such resulting in variable trends in antidepressant prescriptions. Data from each NHS Health Board will be analysed during March 2020 (+/- 6 months). To account for the different populations in each NHS Health Board, prescription quantity will be normalised by population, and the costs by the total quantity of prescribed items.
+
+### Data Preparation  
+
+```{r regions}
+hb_names = read.csv(here("supporting data", "hb14_hb19.csv")) #file with HB Names
+#load file containing 2020 population estimates
+#Before december 2019, HB codes for 4 zones were different
+#To account for this, population data is first joined to hb_names 
+population = read.csv(here("supporting data", "hb2019_pop_est_15072022.csv")) %>% 
+  filter(Year==2020, Sex=="All") %>% 
+  left_join(hb_names,by="HB") %>% 
+  select(population=AllAges,HBName)
+
+#Join data with joined with population census and hb_names from 2020
+data_pandemic_hb = data_pandemic %>% 
+  left_join(hb_names, by="HB") %>% 
+  left_join(population, by="HBName") %>% 
+  filter(Date>="2019-09") %>% 
+  group_by(HBName, Date) %>% 
+  summarise(quantity=sum(PaidQuantity)/mean(population),
+            cost = sum(GrossIngredientCost)/sum(PaidQuantity))
+```
+
+### Visualisation  
+
+```{r hb graphs}
+#function which creates simple ggplot line graphs separated by Scottish NHS Health boards
+#functions are used in this report to improve dryness of code
+generate_hb_graph = function(data_frame, y_axis, y_title) {
+  #"rlang" package is used to pull the y_axis variable from the specified data_frame,
+  #Without it, R attempts to find the y_axis variable in the global environment
+  graph = ggplot(data=data_frame, aes(x=as.factor(Date), y={{y_axis}}, color = HBName,group=HBName))+
+    geom_line()+
+    theme_minimal()+
+    theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust=1))+
+    labs(x="",y=y_title,color="")+
+    annotate("rect", fill = c("green","red"), alpha = 0.045, 
+             xmin = c(1,7), xmax = c(7,13),ymin = -Inf, ymax = Inf)+
+    #the palette "parula" from the "pals" package to reduce the overall number of tones on the graph
+    scale_color_manual(values=as.vector(parula(25)))
+  #return() determines the output of the defined function, in this case, the ggplot object "graph"
+  return(graph)
+}
+
+#the graphs are generated using the previously defined function and fused using the "patchwork" package
+cost_hb = generate_hb_graph(data_pandemic_hb,cost,"Cost per item")+
+  scale_y_continuous(labels=dollar_format(prefix="£"))
+quantity_hb = generate_hb_graph(data_pandemic_hb,quantity,"Item per person")
+hb_graph = (quantity_hb/cost_hb)+
+  plot_annotation(title = "Number and costs of antidepressants at the onset of COVID-19")+
+  plot_layout(guides = "collect") # creates a shared legend for the graphs
+hb_graph
+```
+
+### Discussion  
+
+It appears that **all NHS Health Boards experienced an increase in antidepressant prescription and cost** to some extent at the onset of the pandemic. It can be seen however, that **the extent of this increase varies somewhat by health board**. 
+
+## Is there a correlation between area deprivation and antidepressant prescription at pandemic onset?  
+It is widely reported that more antidepressants are prescribed in deprived areas (example: Gayle, 2017). Hence, it's not difficult to postulate that the pandemic onset would affect poorer areas more, and we would see a higher jump in antidepressant prescriptions and/or costs in March 2020 compared to the pre-pandemic February 2020. To assess this, the change in antidepressant prescriptions/costs between February and March 2020 will be compared to the percentage of patients living in an area ranked in the most deprived quintile (15%) on the Scottish index of multiple deprivation (SIMD) ranking (data of GP demographics and SIMD ranks can be found [here](https://publichealthscotland.scot/publications/general-practice-gp-workforce-and-practice-list-sizes/general-practice-gp-workforce-and-practice-list-sizes-2011-2021/). Data is split into smaller GP practice zones rather than Health Boards because SIMD ranking becomes unreliable when averaged over large areas containing countryside. A linear regression model will be fitted to reveal correlation between the prescriptions/costs and the percentage of patients in the bottom SIMD quintile. 
+
+### Data Preparation
+
+```{r SIMD_rankings}
+#SIMD and GP demographics data are loaded
+#This dataset contains number of patients in each GP practice in each SIMD quintile
+simd = read.csv(here("supporting data", "simd_gp.csv")) %>% 
+  #lambda function which removes pesky commas from numbers
+  mutate(across(4:9, ~gsub(",","",.x))) %>% 
+  mutate_at(c(4:9), as.numeric) %>% 
+  #obtains the population in each GP practice by adding together populations of all SIMD quintiles 
+  mutate(gp_population=rowSums(across(4:9)), 
+         deprived_percentage=parse_number(Patients.in.15..most.deprived.areas)) %>% 
+  select(gp_population,deprived_percentage,GPPractice=Practice.Code)
+
+#the costs and number of antidepressants in March and February 2020 are selected,
+#and the difference between those is saved in quantity_increase and cost_increase columns
+data_pandemic_deprivation = data_pandemic %>%
+  filter(Date %in% c("2020-02","2020-03")) %>% 
+  left_join(hb_names, by="HB") %>%
+  left_join(simd, by="GPPractice") %>% 
+  group_by(GPPractice,Date) %>% 
+  summarise(cost=sum(GrossIngredientCost)/sum(PaidQuantity),
+            quantity=sum(PaidQuantity)/mean(gp_population),
+            deprived_percentage=mean(deprived_percentage)) %>% 
+  pivot_wider(names_from = Date, values_from = c(quantity,cost)) %>% 
+  mutate(quantity_increase = `quantity_2020-03`-`quantity_2020-02`,
+         cost_increase = `cost_2020-03`-`cost_2020-02`)
+```
+
+### Visualisation  
+
+```{r simd graphs}
+#Function that makes a regression graph with SIMD on the x axis
+generate_SIMD_graph = function(data_frame,y_axis,y_title,graph_color){
+  graph = ggplot(data_frame, aes(x=deprived_percentage, y={{y_axis}}))+
+    geom_point()+
+    #fits a line of best fit, with standard error areas
+    geom_smooth(method = "lm", se = TRUE,color=graph_color,fill=graph_color,size=1.5)+
+    stat_cor(cmethod = "pearson", label.x.npc = 0.07, label.y.npc=0.94,color=graph_color)+
+    labs(x="",y=y_title)+
+    theme_minimal()+
+    scale_x_continuous(labels = unit_format(suffix="%"))
+  return(graph)}
+
+#As patchwork currently doesn't support joining axis labels together,
+#a ggplot object "label" is generated, containing only the label of the x axis
+label = ggplot(data.frame(l = "Percentage of patients living in bottom SIMD quintile", x = 1, y = 1)) +
+  geom_text(aes(x, y, label = l), angle = 0) + theme_void() + coord_cartesian(clip = "off")
+
+#Two regression graphs are generated using the previously defined function
+quantity = generate_SIMD_graph(data_pandemic_deprivation,quantity_increase,
+                               "Increase in item per patient","darkorchid3") 
+cost = generate_SIMD_graph(data_pandemic_deprivation,cost_increase,
+                           "Increase in cost per item","darkorange3")+
+  scale_y_continuous(labels=dollar_format(prefix="£"))
+#The graphs are joined together using patchwork, and the x-axis label is added as a "third graph"
+SIMD_cost_quantity = ((quantity+cost)/label)+
+  plot_annotation(title = "Increase in number and cost of antidepressants at the onset of COVID-19")+
+  plot_layout(heights=c(10,0.1))
+SIMD_cost_quantity
+```
+
+### Discussion  
+
+The p-values on these graphs represent the statistical significance of the fitted lines, and the R-values are a measure of correlation. Both the R-values are minuscule, the lines of best fit are nearly horizontal, and the p-values for the increase in prescriptions per patient is significantly larger than 0.05 (the typically agreed-upon cut-off point for statistical significance). This means that there is surprisingly **no evidence for correlation between deprivation of the area and the increase in number of antidepressant prescriptions per patient at the onset of COVID-19** in March 2020. Counterintuitively, it appears that the pandemic onset did not affect deprived areas more, at least in its first month.
+However, although the R-value of the correlation between the increase in costs and percentage of deprived patients is only -0.065, the p-value is slightly below 0.05. This suggests that there is moderate **evidence to believe that the cost of antidepressants increased less at the onset of the pandemic in more deprived areas**, albeit by a tiny margin. This could be explained by the fact that the majority of GP practices with the highest percentages of deprived individuals are located in major city hubs like Glasgow. The cost of delivery of antidepressants to such city hubs should be low due to developed transporting infrastructure, thereby reducing the price of antidepressants.
+
+## Long-term effects of COVID-19 on antidepressant prescriptions  
+Previous sections assessed the immediate effects of COVID-19 on antidepressant prescriptions in its initial months. It is also possible that the pandemic had more covert effects on the rate of antidepressant prescriptions. As seen in the first graph, the number of prescribed antidepressants tends to gradually increase year by year. The COVID-19 pandemic could have affected this growth in antidepressant prescriptions. It is possible that during the pandemic years, the rate of growth of antidepressant prescriptions increased due to higher prevalence of anxiety and depression caused by COVID-19.  
+To assess this, the rate of increase in antibiotic prescriptions in 2019 (pre-Pandemic) will be compared to the increase in 2021 (during the Pandemic). The quantity of prescribed items in each NHS Health Board during both years will be analysed using a general linear model. The gradient of the line of best fit of the model represents the monthly increase in antibiotic prescriptions throughout the year, and the p-value represents the statistical significance of this gradient. Therefore we can compare the rates of monthly increase in 2019 to the monthly increase in 2021, to reveal whether the pandemic had an effect on the growth of antidepressant prescriptions.
+
+### Data Preparation  
+
+```{r rate_of_increase}
+#preparation of 2019 data
+data_pandemic_2019_hb = data_pandemic %>% 
+  left_join(hb_names, by="HB") %>% 
+  left_join(population, by="HBName") %>% 
+  filter(Date>="2019-01"&Date<"2020-01") %>% 
+  #the Date is reformatted to allow the use of the lm() function later on
+  mutate(month=as.numeric(month(ym(Date)))) %>% 
+  group_by(HBName, month) %>% 
+  summarise(quantity=sum(PaidQuantity))
+#preparation of 2021 data. 
+files_2021 = list.files(here("data_2021"), pattern = "csv")
+data_pandemic_2021 = files_2021 %>%
+  map_dfr(~read_csv(here("data_2021", .)))
+data_pandemic_2021_hb = data_pandemic_2021 %>%
+  filter(str_detect(BNFItemCode, "^0403")) %>%
+  mutate(HB=HBT,month=as.numeric(month(ym(PaidDateMonth)))) %>%
+  left_join(hb_names, by="HB") %>%
+  left_join(population, by="HBName") %>% #it's assumed population is unchanged from 2020
+  group_by(HBName, month) %>%
+  summarise(quantity=sum(PaidQuantity))
+```
+
+### Table generation  
+
+```{r table of rates}
+#function for generating a data frame of results of multiple linear models
+generate_rate_dfr = function(data_frame){
+  rates = data_frame %>% 
+    #the nest() function separates the dataframe into smaller dataframes
+    nest(data=-HBName) %>% 
+    #the map functions allows for the application of lm() to multiple dataframes created by nest()
+    mutate(fit = map(data, ~ lm(quantity ~ month, data = .x)),
+         tidied = map(fit, tidy)) %>% # "tidy" from the broom package allows better presentation
+    #unnest() flattens the nested stack back into one
+    unnest(tidied) %>% 
+    filter(term=="month") %>% 
+    select(HBName,rate=estimate,p = p.value)
+  #data frame including HBNames, gradients and p values is returned
+  return(rates)
+}
+
+#Two rate tables are generated
+rates_2019 = generate_rate_dfr(data_pandemic_2019_hb)
+rates_2021 = generate_rate_dfr(data_pandemic_2021_hb)%>% 
+  select(HBName, rate_21=rate, p_21=p) # the columns from 2021 data are renamed slightly
+#gt table of rates is generated
+rates_table = rates_2019 %>% 
+  left_join(rates_2021, by="HBName") %>% 
+  gt(rowname_col = "HBName",
+     groupname_col = "NA",) %>% 
+  fmt_number(1:5, decimals = 3) %>% 
+  summary_rows(columns=c(rate,rate_21), fns=list(Total="sum"),missing_text = "") %>% 
+  tab_header(title = "Rate of increase of antidepressant prescriptions",
+             subtitle = "In 2019 and 2021") %>% 
+  cols_label(rate_21 = "Monthly increase in 2021", p_21= "2021 p-value",
+             rate = "Monthly increase in 2019", p= "2019 p-value",) %>% 
+  #The following aesthetic options are not rendered correctly in pdf, 
+  #but cells should be red when the rate is higher in 2021
+  tab_style(style=cell_fill(color="red",alpha=0.2),
+            locations=cells_body(columns=rate_21, rows=rate_21>rate))
+rates_table
+```
+
+### Discussion  
+
+**In 2021 the monthly increase in antidepressant prescriptions is higher in every single NHS Health Board** (apart from NHS Borders). This effect is harder to see on a graph, but hints at the gradual rise in the levels of stress and anxiety due to the COVID-19 pandemic. It is also possible that antibiotic prescription rates grow exponentially, and the rate increases in a similar fashion every single year regardless of the presence of a global pandemic. This is unlikely, as previous reports suggest a more linear trend in antidepressant prescriptions (Luo et al., 2020).
+
+## Conclusions
+It appears that the COVID-19 pandemic had a transient effect on antidepressant prescriptions and costs across Scotland, with both the values peaking in March 2020. Although more antidepressants are typically prescribed in more deprived areas, this report found no evidence that the deprived zones were affected more by the pandemic onset. COVID-19 seems to have had a long-term effect, as the monthly increase in antidepressant prescriptions was higher in 2021 than it was before the pandemic. Overall, this reports provides evidence consistent with the idea that the increased anxiety and stress levels due to the COVID-19 pandemic affected antidepressant prescription trends. The increasing prescription rates of antidepressants already put a strain onto NHS Scotland, and it seems that COVID-19 accelerated this growth, and thereby the burden on the NHS. 
+
+## Bibliography  
+Gayle, D. (2017). Antidepressants prescribed far more in deprived English coastal towns.*The Guardian,* 14 April. Available at: [link](https://www.theguardian.com/society/2017/apr/14/antidepressants-prescribed-deprived-seaside-towns-of-north-and-east-blackpool-sunderland-and-east-lindsey-nhs)
+
+Ellis-Petersen, H. (2020). India limits medicine exports after supplies hit by coronavirus. *The Guardian,* 4 March. Available at: [link]( https://www.theguardian.com/world/2020/mar/04/india-limits-medicine-exports-coronavirus-paracetamol-antibiotics)
+
+Luo, Y. et al. (2020) National Prescription Patterns of Antidepressants in the Treatment of Adults With Major Depression in the US Between 1996 and 2015: A Population Representative Survey Based Analysis. *Frontiers in psychiatry.* [Online] 1135–35.
+
+Socal, M. P. et al. (2021). The Pandemic and the Supply Chain: Gaps in Pharmaceutical Production and Distribution. *American journal of public health (1971)*. [Online] 111 (4), 635–639.
+
+World Health Organisation (WHO). (2022). COVID-19 pandemic triggers 25% increase in prevalence of anxiety and depression worldwide. Available at: [link](https://www.who.int/news/item/02-03-2022-covid-19-pandemic-triggers-25-increase-in-prevalence-of-anxiety-and-depression-worldwide)
