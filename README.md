@@ -3,14 +3,6 @@
 
 ---
 
-# Trends in Antidepressant Prescription During the COVID-19 Pandemic  
-**Author:** *[Your Name]*  
-**Date:** 11/06/2022  
-
-This repository contains the data preparation, visualisations, and statistical analyses used to investigate whether the COVID-19 pandemic influenced antidepressant prescription rates across Scotland. The project combines publicly available NHS Scotland datasets, tidyverse-based wrangling, and ggplot2-driven visualisations to explore changes before, during, and after the onset of COVID-19.
-
----
-
 ## **Project Overview**
 
 The COVID-19 pandemic was a major societal stressor and has been associated with a substantial increase in the prevalence of anxiety and depression worldwide. This study evaluates whether these trends translated into increased prescribing of antidepressants across Scotland, both in the short term (pandemic onset in March 2020) and in the longer aftermath.
@@ -21,6 +13,12 @@ Core research questions:
 2. **Did those effects vary between NHS Health Boards?**
 3. **Is socioeconomic deprivation associated with changes in prescription rates?**
 4. **Did COVID-19 alter the long-term trajectory of antidepressant prescribing?**
+
+# Trends in Antidepressant Prescription During the COVID-19 Pandemic  
+
+**Date:** 11/06/2022  
+
+This repository contains the data preparation, visualisations, and statistical analyses used to investigate whether the COVID-19 pandemic influenced antidepressant prescription rates across Scotland. The project combines publicly available NHS Scotland datasets, tidyverse-based wrangling, and ggplot2-driven visualisations to explore changes before, during, and after the onset of COVID-19.
 
 ---
 
